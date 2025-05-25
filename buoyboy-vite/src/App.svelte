@@ -416,36 +416,24 @@ function formatDisplayDate(date) {
 }
 
 // --- Lifecycle ---
-onMount(() => {
-  // Initialize Map as soon as L and #map are ready
-  let mapAttempts = 0;
-  const maxMapAttempts = 50;
-  const mapInterval = setInterval(() => {
-    mapAttempts++;
-    if (typeof L !== 'undefined' && document.getElementById('map')) {
-      clearInterval(mapInterval);
-      initMap();
-    } else if (mapAttempts >= maxMapAttempts) {
-      clearInterval(mapInterval);
-      globalError = "Map library or element failed to load. Try refreshing.";
-      console.error("Timeout waiting for map libraries or DOM elements.");
-    }
-  }, 100);
+import { onMount, onDestroy, tick } from 'svelte';
+onMount(async () => {
+  await tick(); // make sure chartCanvas is bound
 
-  // Initialize Chart as soon as Chart.js and chartCanvas are ready
-  let chartAttempts = 0;
-  const maxChartAttempts = 50;
-  const chartInterval = setInterval(() => {
-    chartAttempts++;
-    if (typeof Chart !== 'undefined' && chartCanvas) {
-      clearInterval(chartInterval);
-      initChart();
-    } else if (chartAttempts >= maxChartAttempts) {
-      clearInterval(chartInterval);
-      if (!globalError) globalError = "Chart library or element failed to load. Try refreshing.";
-      console.error("Timeout waiting for chart libraries or DOM elements.");
-    }
-  }, 100);
+  if (typeof L !== 'undefined' && document.getElementById('map')) {
+    initMap();
+  } else {
+    globalError = "Map library or element failed to load. Try refreshing.";
+  }
+  if (typeof Chart !== 'undefined' && chartCanvas) {
+    initChart();
+  } else {
+    globalError = "Chart library or element failed to load. Try refreshing.";
+  }
+});
+onDestroy(() => {
+  if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
 });
 
 onDestroy(() => {
