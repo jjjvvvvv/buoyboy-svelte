@@ -279,14 +279,18 @@ async function fetchBuoyData(buoy) {
 }
 
 function parseBuoyData(specText) {
-  const lines = specText.split('\n').slice(2);
+  const lines = specText.split('\n').filter(line => line.trim().length > 0 && !line.trim().startsWith("#"));
   const readings = [];
   let latestTimestamp = null;
   let hasMissingData = false;
 
   for (const line of lines) {
     const parts = line.trim().split(/\s+/);
-    if (parts.length < 15) continue;
+    // Debug log:
+    if (parts.length < 15) {
+      console.log('Line skipped (not enough columns):', line);
+      continue;
+    }
 
     const yy = parseInt(parts[0]);
     const mm = parseInt(parts[1]);
