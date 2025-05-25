@@ -5,9 +5,8 @@
 
 <script>
   import { onMount, onDestroy, tick} from 'svelte';
-  import Chart from 'chart.js/auto'; // This registers everything needed
-  import 'chartjs-adapter-date-fns'; // This makes time scale work!
-
+  let Chart; // Declare Chart here for later use
+  
   // --- Buoy station metadata: Copy-paste your station objects array below ---
   const stations = [
   { id: "41008", name: "GRAYS REEF - 40 NM Southeast of Savannah, GA", lat: 31.4, lon: -80.866 },
@@ -408,18 +407,30 @@
 
   // --- Lifecycle ---
   onMount(async () => {
-    isMounted = true;
-    await tick();
-    if (typeof L !== 'undefined' && mapDiv) {
-      initMap();
-    } else {
-      globalError = "Map library or element failed to load. Try refreshing.";
-    }
-    if (typeof Chart !== 'undefined' && chartCanvas) {
-      initChart();
-    } else {
-      globalError = "Chart library or element failed to load. Try refreshing.";
-    }
+  if (typeof window === 'undefined') return; // SSR guard
+
+  // Dynamically import Chart.js and date adapter
+  const ChartModule = await import('chart.js/auto');
+  await import('chartjs-adapter-date-fns');
+  Chart = ChartModule.default || ChartModule;
+
+  // Wait for next DOM update
+  isMounted = true;
+  await tick();
+
+  // Make sure Leaflet is available (from CDN)
+  if (typeof L !== 'undefined' && mapDiv) {
+    initMap();
+  } else {
+    globalError = "Map library or element failed to load. Try refreshing.";
+    console.error(globalError);
+  }
+  if (typeof Chart !== 'undefined' && chartCanvas) {
+    initChart();
+  } else {
+    globalError = "Chart library or element failed to load. Try refreshing.";
+    console.error(globalError);
+  }
   });
 
   onDestroy(() => {
