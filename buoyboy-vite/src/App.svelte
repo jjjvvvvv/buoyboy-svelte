@@ -143,45 +143,43 @@
   ];
 
   // --- Constants ---
-const MAX_SELECTED_BUOYS = 3;
-const BUOY_COLORS = ['#FF4136', '#FFDC00', '#0074D9']; // Red, Yellow, Blue
-const DEFAULT_BUOY_COLOR = '#888888'; // Gray for unselected
-const METER_TO_FEET = 3.28084;
+  const MAX_SELECTED_BUOYS = 3;
+  const BUOY_COLORS = ['#FF4136', '#FFDC00', '#0074D9'];
+  const DEFAULT_BUOY_COLOR = '#888888';
+  const METER_TO_FEET = 3.28084;
 
-const METRICS = {
-  WVHT: { key: 'waveHeight',     label: 'Wave Height',     unit: 'ft', specIndex: 5, isDirection: false },
-  SwH:  { key: 'swellHeight',    label: 'Swell Height',    unit: 'ft', specIndex: 6, isDirection: false },
-  SwP:  { key: 'swellPeriod',    label: 'Swell Period',    unit: 's',  specIndex: 7, isDirection: false },
-  SwD:  { key: 'swellDirection', label: 'Swell Direction', unit: '°',  specIndex: 14, isDirection: true }
-};
+  const METRICS = {
+    WVHT: { key: 'waveHeight', label: 'Wave Height', unit: 'ft', specIndex: 5, isDirection: false },
+    SwH: { key: 'swellHeight', label: 'Swell Height', unit: 'ft', specIndex: 6, isDirection: false },
+    SwP: { key: 'swellPeriod', label: 'Swell Period', unit: 's', specIndex: 7, isDirection: false },
+    SwD: { key: 'swellDirection', label: 'Swell Direction', unit: '°', specIndex: 14, isDirection: true }
+  };
 
-// --- App State ---
-let selectedBuoys = []; // Array of { id, name, lat, lon, color, isLoading }
-let buoyDataCache = {}; // { buoyId: { readings: [], lastUpdate: Date, hasMissingData: boolean } }
-let selectedMetricKey = 'SwH'; // Default metric key from METRICS
+  // --- App State ---
+  let selectedBuoys = [];
+  let buoyDataCache = {};
+  let selectedMetricKey = 'SwH';
 
-let mapInstance;
-let mapMarkers = []; // Holds { id, leafletMarkerInstance }
+  let mapInstance;
+  let mapMarkers = [];
+  let chartInstance;
+  let chartCanvas;
+  let globalError = null;
+  let dataFetchError = null;
+  let isMounted = false;
 
-let chartInstance;
-let chartCanvas; // Bound to the canvas element
-
-let globalError = null; // For general errors like library loading
-let dataFetchError = null; // For errors specific to buoy data fetching
-
-// --- Map Logic ---
-function initMap() {
-  if (typeof L === 'undefined' || !document.getElementById('map')) {
+  // --- Map Logic ---
+  function initMap() {
+    if (typeof L === 'undefined' || !document.getElementById('map')) {
       globalError = "Map library or map container not ready.";
       console.error(globalError);
       return;
-  }
-  try {
+    }
+    try {
       mapInstance = L.map('map').setView([34, -70], 4);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(mapInstance);
-
       mapMarkers = stations.map(station => {
         const marker = L.marker([station.lat, station.lon], {
           icon: L.divIcon({
@@ -191,150 +189,144 @@ function initMap() {
             iconAnchor: [7, 7]
           })
         })
-        .addTo(mapInstance)
-        .on('click', () => toggleBuoySelection(station.id));
+          .addTo(mapInstance)
+          .on('click', () => toggleBuoySelection(station.id));
         return { id: station.id, marker };
       });
-  } catch (e) {
+    } catch (e) {
       globalError = "Error initializing map: " + e.message;
       console.error(globalError, e);
-  }
-}
-
-function updateMapMarkers() {
-  if (!mapInstance) return;
-  mapMarkers.forEach(({ id, marker }) => {
-    const selectedBuoy = selectedBuoys.find(b => b.id === id);
-    const color = selectedBuoy ? selectedBuoy.color : DEFAULT_BUOY_COLOR;
-    marker.setIcon(L.divIcon({
-      className: 'custom-div-icon',
-      html: `<div style="background-color:${color};width:14px;height:14px;border-radius:50%;border:1px solid #fff;"></div>`,
-      iconSize: [14, 14],
-      iconAnchor: [7, 7]
-    }));
-  });
-}
-
-async function toggleBuoySelection(buoyId) {
-  dataFetchError = null;
-  const existingIndex = selectedBuoys.findIndex(b => b.id === buoyId);
-
-  if (existingIndex > -1) {
-    selectedBuoys = selectedBuoys.filter(b => b.id !== buoyId);
-  } else if (selectedBuoys.length < MAX_SELECTED_BUOYS) {
-    const stationInfo = stations.find(s => s.id === buoyId);
-    if (stationInfo) {
-      const usedColors = selectedBuoys.map(b => b.color);
-      const availableColor = BUOY_COLORS.find(c => !usedColors.includes(c)) || BUOY_COLORS[selectedBuoys.length % BUOY_COLORS.length];
-      const newBuoy = { ...stationInfo, color: availableColor, isLoading: true };
-      selectedBuoys = [...selectedBuoys, newBuoy];
-      await fetchBuoyData(newBuoy);
     }
-  } else {
-    dataFetchError = `Max ${MAX_SELECTED_BUOYS} buoys can be selected.`;
-    setTimeout(() => dataFetchError = null, 3000);
   }
-  updateMapMarkers();
-  updateChart();
-}
 
-function clearAllSelections() {
-  selectedBuoys = [];
-  dataFetchError = null;
-  updateMapMarkers();
-  updateChart();
-}
+  function updateMapMarkers() {
+    if (!mapInstance) return;
+    mapMarkers.forEach(({ id, marker }) => {
+      const selectedBuoy = selectedBuoys.find(b => b.id === id);
+      const color = selectedBuoy ? selectedBuoy.color : DEFAULT_BUOY_COLOR;
+      marker.setIcon(L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="background-color:${color};width:14px;height:14px;border-radius:50%;border:1px solid #fff;"></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      }));
+    });
+  }
 
-// --- Data Fetching Logic ---
-async function fetchBuoyData(buoy) {
-  const buoyInSelection = selectedBuoys.find(b => b.id === buoy.id);
-  if (buoyInSelection) buoyInSelection.isLoading = true;
-  selectedBuoys = [...selectedBuoys];
+  async function toggleBuoySelection(buoyId) {
+    dataFetchError = null;
+    const existingIndex = selectedBuoys.findIndex(b => b.id === buoyId);
+    if (existingIndex > -1) {
+      selectedBuoys = selectedBuoys.filter(b => b.id !== buoyId);
+    } else if (selectedBuoys.length < MAX_SELECTED_BUOYS) {
+      const stationInfo = stations.find(s => s.id === buoyId);
+      if (stationInfo) {
+        const usedColors = selectedBuoys.map(b => b.color);
+        const availableColor = BUOY_COLORS.find(c => !usedColors.includes(c)) || BUOY_COLORS[selectedBuoys.length % BUOY_COLORS.length];
+        const newBuoy = { ...stationInfo, color: availableColor, isLoading: true };
+        selectedBuoys = [...selectedBuoys, newBuoy];
+        await fetchBuoyData(newBuoy);
+      }
+    } else {
+      dataFetchError = `Max ${MAX_SELECTED_BUOYS} buoys can be selected.`;
+      setTimeout(() => { if (isMounted) dataFetchError = null; }, 3000);
+    }
+    updateMapMarkers();
+    updateChart();
+  }
 
-  if (buoyDataCache[buoy.id]) {
+  function clearAllSelections() {
+    selectedBuoys = [];
+    dataFetchError = null;
+    updateMapMarkers();
+    updateChart();
+  }
+
+  // --- Data Fetching Logic ---
+  async function fetchBuoyData(buoy) {
+    const buoyInSelection = selectedBuoys.find(b => b.id === buoy.id);
+    if (buoyInSelection) buoyInSelection.isLoading = true;
+    selectedBuoys = [...selectedBuoys];
+    if (buoyDataCache[buoy.id]) {
       if (buoyInSelection) buoyInSelection.isLoading = false;
       selectedBuoys = [...selectedBuoys];
       updateChart();
       return;
-  }
-
-  try {
-    const response = await fetch(`/api/buoy?buoyId=${buoy.id}`);
-    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status} for buoy ${buoy.id}`);
-    const specText = await response.text();
-    const parsedData = parseBuoyData(specText);
-    buoyDataCache = { ...buoyDataCache, [buoy.id]: parsedData };
-
-    if (buoyInSelection) buoyInSelection.isLoading = false;
-    selectedBuoys = [...selectedBuoys];
-    updateChart();
-  } catch (error) {
-    console.error(`Error fetching data for buoy ${buoy.id}:`, error);
-    dataFetchError = `Could not load data for ${buoy.name || buoy.id}.`;
-    if (buoyInSelection) buoyInSelection.isLoading = false;
-    buoyDataCache = { ...buoyDataCache, [buoy.id]: { readings: [], lastUpdate: null, hasMissingData: true, error: true } };
-    selectedBuoys = [...selectedBuoys];
-    updateChart();
-  }
-}
-
-function parseBuoyData(specText) {
-  const lines = specText.split('\n').filter(line => line.trim().length > 0 && !line.trim().startsWith("#"));
-  const readings = [];
-  let latestTimestamp = null;
-  let hasMissingData = false;
-
-  for (const line of lines) {
-    const parts = line.trim().split(/\s+/);
-    // Debug log:
-    if (parts.length < 15) {
-      console.log('Line skipped (not enough columns):', line);
-      continue;
     }
+    try {
+      const response = await fetch(`/api/buoy?buoyId=${buoy.id}`);
+      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status} for buoy ${buoy.id}`);
+      const specText = await response.text();
+      const parsedData = parseBuoyData(specText);
+      if (!isMounted) return;
+      buoyDataCache = { ...buoyDataCache, [buoy.id]: parsedData };
+      if (buoyInSelection) buoyInSelection.isLoading = false;
+      selectedBuoys = [...selectedBuoys];
+      updateChart();
+    } catch (error) {
+      if (!isMounted) return;
+      console.error(`Error fetching data for buoy ${buoy.id}:`, error);
+      dataFetchError = `Could not load data for ${buoy.name || buoy.id}.`;
+      if (buoyInSelection) buoyInSelection.isLoading = false;
+      buoyDataCache = { ...buoyDataCache, [buoy.id]: { readings: [], lastUpdate: null, hasMissingData: true, error: true } };
+      selectedBuoys = [...selectedBuoys];
+      updateChart();
+    }
+  }
 
-    const yy = parseInt(parts[0]);
-    const mm = parseInt(parts[1]);
-    const dd = parseInt(parts[2]);
-    const hr = parseInt(parts[3]);
-    const mn = parseInt(parts[4]);
-    if ([yy, mm, dd, hr, mn].some(isNaN)) continue;
-    const year = 2000 + yy;
-    const timestamp = new Date(Date.UTC(year, mm - 1, dd, hr, mn));
-    if (isNaN(timestamp.getTime())) continue;
-    if (!latestTimestamp || timestamp > latestTimestamp) latestTimestamp = timestamp;
-
-    const reading = { timestamp };
-    let lineMissing = false;
-    Object.entries(METRICS).forEach(([metricCode, metricInfo]) => {
-      const rawValue = parts[metricInfo.specIndex];
-      if (rawValue === "MM" || rawValue === undefined) {
-        reading[metricInfo.key] = null;
-        lineMissing = true;
-      } else {
-        const value = parseFloat(rawValue);
-        if (isNaN(value)) {
+  function parseBuoyData(specText) {
+    const lines = specText.split('\n').filter(line => line.trim().length > 0 && !line.trim().startsWith("#"));
+    const readings = [];
+    let latestTimestamp = null;
+    let hasMissingData = false;
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 15) {
+        console.log('Line skipped (not enough columns):', line);
+        continue;
+      }
+      const yy = parseInt(parts[0]);
+      const mm = parseInt(parts[1]);
+      const dd = parseInt(parts[2]);
+      const hr = parseInt(parts[3]);
+      const mn = parseInt(parts[4]);
+      if ([yy, mm, dd, hr, mn].some(isNaN)) continue;
+      const year = 2000 + yy;
+      const timestamp = new Date(Date.UTC(year, mm - 1, dd, hr, mn));
+      if (isNaN(timestamp.getTime())) continue;
+      if (!latestTimestamp || timestamp > latestTimestamp) latestTimestamp = timestamp;
+      const reading = { timestamp };
+      let lineMissing = false;
+      Object.entries(METRICS).forEach(([metricCode, metricInfo]) => {
+        const rawValue = parts[metricInfo.specIndex];
+        if (rawValue === "MM" || rawValue === undefined) {
           reading[metricInfo.key] = null;
           lineMissing = true;
         } else {
-          reading[metricInfo.key] = metricInfo.unit === 'ft' ? value * METER_TO_FEET : value;
+          const value = parseFloat(rawValue);
+          if (isNaN(value)) {
+            reading[metricInfo.key] = null;
+            lineMissing = true;
+          } else {
+            reading[metricInfo.key] = metricInfo.unit === 'ft' ? value * METER_TO_FEET : value;
+          }
         }
-      }
-    });
-    if (lineMissing) hasMissingData = true;
-    readings.push(reading);
+      });
+      if (lineMissing) hasMissingData = true;
+      readings.push(reading);
+    }
+    readings.sort((a, b) => a.timestamp - b.timestamp);
+    return { readings, lastUpdate: latestTimestamp, hasMissingData };
   }
-  readings.sort((a,b) => a.timestamp - b.timestamp);
-  return { readings, lastUpdate: latestTimestamp, hasMissingData };
-}
 
-// --- Chart Logic ---
-function initChart() {
-  if (!chartCanvas || typeof Chart === 'undefined') {
+  // --- Chart Logic ---
+  function initChart() {
+    if (!chartCanvas || typeof Chart === 'undefined') {
       globalError = "Chart library or chart canvas not ready.";
       console.error(globalError);
       return;
-  }
-  try {
+    }
+    try {
       const ctx = chartCanvas.getContext('2d');
       chartInstance = new Chart(ctx, {
         type: 'line',
@@ -368,328 +360,74 @@ function initChart() {
           interaction: { mode: 'nearest', axis: 'x', intersect: false }
         }
       });
-  } catch(e) {
+    } catch (e) {
       globalError = "Error initializing chart: " + e.message;
       console.error(globalError, e);
+    }
   }
-}
 
-function updateChart() {
-  if (!chartInstance) return;
-  const currentMetricInfo = METRICS[selectedMetricKey];
-  chartInstance.options.scales.y.title.text = currentMetricInfo.label + (currentMetricInfo.unit ? ` (${currentMetricInfo.unit})` : '');
-  chartInstance.options.scales.y.beginAtZero = !currentMetricInfo.isDirection;
+  function updateChart() {
+    if (!chartInstance) return;
+    const currentMetricInfo = METRICS[selectedMetricKey];
+    chartInstance.options.scales.y.title.text = currentMetricInfo.label + (currentMetricInfo.unit ? ` (${currentMetricInfo.unit})` : '');
+    chartInstance.options.scales.y.beginAtZero = !currentMetricInfo.isDirection;
+    const datasets = selectedBuoys
+      .filter(b => !b.isLoading && buoyDataCache[b.id] && buoyDataCache[b.id].readings.length)
+      .map(buoy => {
+        const buoySpecificData = buoyDataCache[buoy.id];
+        const readings = buoySpecificData?.readings || [];
+        const dataPoints = readings
+          .map(reading => ({
+            x: reading.timestamp,
+            y: reading[currentMetricInfo.key]
+          }))
+          .filter(point => point.y !== null && point.y !== undefined && !isNaN(point.y));
+        return {
+          label: `${buoy.name || buoy.id}`,
+          data: dataPoints,
+          borderColor: buoy.color,
+          backgroundColor: buoy.color + '33',
+          tension: 0.1,
+          fill: false,
+          pointRadius: dataPoints.length < 100 ? 2 : 1,
+          pointHoverRadius: 4
+        };
+      });
+    chartInstance.data.datasets = datasets;
+    chartInstance.update();
+  }
 
-  const datasets = selectedBuoys
-    .filter(b => !b.isLoading && buoyDataCache[b.id] && buoyDataCache[b.id].readings.length)
-    .map(buoy => {
-      const buoySpecificData = buoyDataCache[buoy.id];
-      const readings = buoySpecificData?.readings || [];
-      const dataPoints = readings
-        .map(reading => ({
-          x: reading.timestamp, // <-- Date object, not milliseconds
-          y: reading[currentMetricInfo.key]
-        }))
-        .filter(point => point.y !== null && point.y !== undefined && !isNaN(point.y));
-      return {
-        label: `${buoy.name || buoy.id}`,
-        data: dataPoints,
-        borderColor: buoy.color,
-        backgroundColor: buoy.color + '33',
-        tension: 0.1,
-        fill: false,
-        pointRadius: dataPoints.length < 100 ? 2 : 1,
-        pointHoverRadius: 4
-      };
-    });
-
-  chartInstance.data.datasets = datasets;
-  chartInstance.update();
-}
-
-// Utility to format date for display
-function formatDisplayDate(date) {
-  if (!date || isNaN(new Date(date).getTime())) return "N/A";
-  return new Date(date).toLocaleString('en-US', {
+  // Utility to format date for display
+  function formatDisplayDate(date) {
+    if (!date || isNaN(new Date(date).getTime())) return "N/A";
+    return new Date(date).toLocaleString('en-US', {
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false
-  }) + " UTC";
-}
-
-// --- Lifecycle ---
-onMount(async () => {
-  await tick(); // make sure chartCanvas is bound
-
-  if (typeof L !== 'undefined' && document.getElementById('map')) {
-    initMap();
-  } else {
-    globalError = "Map library or element failed to load. Try refreshing.";
+    }) + " UTC";
   }
-  if (typeof Chart !== 'undefined' && chartCanvas) {
-    initChart();
-  } else {
-    globalError = "Chart library or element failed to load. Try refreshing.";
+
+  // --- Lifecycle ---
+  onMount(async () => {
+    isMounted = true;
+    await tick();
+    if (typeof L !== 'undefined' && document.getElementById('map')) {
+      initMap();
+    } else {
+      globalError = "Map library or element failed to load. Try refreshing.";
+    }
+    if (typeof Chart !== 'undefined' && chartCanvas) {
+      initChart();
+    } else {
+      globalError = "Chart library or element failed to load. Try refreshing.";
+    }
+  });
+
+  onDestroy(() => {
+    isMounted = false;
+    if (mapInstance) { try { mapInstance.remove(); } catch (e) {} }
+    if (chartInstance) { try { chartInstance.destroy(); } catch (e) {} }
+  });
+
+  $: if (selectedMetricKey && chartInstance) {
+    updateChart();
   }
-});
-
-onDestroy(() => {
-  if (mapInstance) { try { mapInstance.remove(); } catch(e){} }
-  if (chartInstance) { try { chartInstance.destroy(); } catch(e){} }
-});
-
-// Reactive update for chart when metric changes
-$: if (selectedMetricKey && chartInstance) {
-  updateChart();
-}
 </script>
-
-<div class="buoyboy-app">
-  <header class="app-header">
-    <h1>🌊 BuoyBoy</h1>
-    {#if selectedBuoys.length > 0}
-      <button class="clear-all-btn" on:click={clearAllSelections} title="Clear All Selections">
-        Clear All (X)
-      </button>
-    {/if}
-  </header>
-
-  <div class="main-content">
-    <div class="map-panel">
-      <div id="map" class="map-container"></div>
-      {#if globalError}
-        <p class="error-message global-error-msg">{globalError}</p>
-      {/if}
-    </div>
-
-    <div class="chart-panel">
-      <div class="controls">
-        <label for="metric-picker">Metric:</label>
-        <select id="metric-picker" bind:value={selectedMetricKey}>
-          {#each Object.entries(METRICS) as [key, { label, unit }]}
-            <option value={key}>{label} {unit ? `(${unit})` : ''}</option>
-          {/each}
-        </select>
-      </div>
-
-      <div class="chart-area-wrapper">
-        {#if selectedBuoys.length === 0}
-          <p class="placeholder-text">Select up to {MAX_SELECTED_BUOYS} buoys on the map to view data.</p>
-        {:else}
-          <canvas bind:this={chartCanvas} id="buoyChart"></canvas>
-        {/if}
-      </div>
-      {#if dataFetchError}
-        <p class="error-message data-error-msg">{dataFetchError}</p>
-      {/if}
-    </div>
-  </div>
-
-  <div class="selected-buoys-metadata">
-    {#if selectedBuoys.length > 0}
-      <h3>Selected Buoys Details:</h3>
-      {#each selectedBuoys as buoy (buoy.id)}
-        <div class="buoy-info-item" style="border-left-color:{buoy.color};">
-          <div class="buoy-info-header">
-            <span class="buoy-color-dot" style="background-color:{buoy.color};"></span>
-            <strong>{buoy.name || `Buoy ${buoy.id}`}</strong>
-            {#if buoy.isLoading}
-              <span class="loading-text">(Loading data...)</span>
-            {/if}
-          </div>
-          {#if !buoy.isLoading && buoyDataCache[buoy.id]}
-            <p>Last Update: {formatDisplayDate(buoyDataCache[buoy.id].lastUpdate)}</p>
-            {#if buoyDataCache[buoy.id].hasMissingData}
-              <p class="warning-message">⚠️ Some data points may be missing for this period.</p>
-            {/if}
-             {#if buoyDataCache[buoy.id].error}
-              <p class="error-message">⚠️ Could not load data for this buoy.</p>
-            {/if}
-          {/if}
-        </div>
-      {/each}
-    {/if}
-  </div>
-</div>
-
-<style>
-  :global(body) {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background-color: #282c34;
-    color: #f0f0f0;
-    line-height: 1.6;
-  }
-
-  .buoyboy-app {
-    padding: 1em;
-    display: flex;
-    flex-direction: column;
-    min-height: calc(100vh - 2em); /* Full height minus padding */
-  }
-
-  .app-header {
-    text-align: center;
-    margin-bottom: 1em;
-    padding-bottom: 0.5em;
-    border-bottom: 1px solid #444;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .app-header h1 {
-    margin: 0;
-    color: #FFDC00; /* Yellow highlight */
-    font-size: 2em;
-  }
-
-  .clear-all-btn {
-    background-color: #555;
-    color: #fff;
-    border: none;
-    padding: 0.5em 1em;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.9em;
-  }
-  .clear-all-btn:hover {
-    background-color: #FF4136; /* Red on hover for clear */
-  }
-
-  .main-content {
-    display: flex;
-    flex-direction: column; /* Stack map and chart on smaller screens */
-    gap: 1em;
-  }
-
-  .map-panel, .chart-panel {
-    border: 1px solid #444;
-    border-radius: 8px;
-    padding: 1em;
-    background-color: #333740;
-  }
-
-  .map-container {
-    height: 350px;
-    width: 100%;
-    border-radius: 6px; /* Inner radius if panel has padding */
-  }
-
-  .controls {
-    margin-bottom: 1em;
-    display: flex;
-    align-items: center;
-    gap: 0.5em;
-  }
-  .controls label {
-    font-weight: bold;
-  }
-  .controls select {
-    padding: 0.5em;
-    background-color: #444;
-    color: #fff;
-    border: 1px solid #555;
-    border-radius: 4px;
-  }
-
-  .chart-area-wrapper {
-    height: 300px; /* Fixed height for chart or placeholder */
-    position: relative; /* For potential overlays or absolute positioned elements inside */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  #buoyChart {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-  .placeholder-text {
-    text-align: center;
-    color: #aaa;
-  }
-
-  .selected-buoys-metadata {
-    margin-top: 1em;
-    padding: 1em;
-    background-color: #333740;
-    border: 1px solid #444;
-    border-radius: 8px;
-  }
-  .selected-buoys-metadata h3 {
-    margin-top: 0;
-    color: #FFDC00;
-  }
-  .buoy-info-item {
-    margin-bottom: 0.75em;
-    padding: 0.5em 0.75em;
-    border-left-width: 5px;
-    border-left-style: solid;
-    background-color: #282c34;
-    border-radius: 0 4px 4px 0;
-  }
-  .buoy-info-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5em;
-    margin-bottom: 0.25em;
-  }
-  .buoy-color-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    display: inline-block;
-    flex-shrink: 0;
-  }
-  .buoy-info-item p {
-    margin: 0.2em 0;
-    font-size: 0.9em;
-    color: #ccc;
-  }
-  .loading-text {
-    font-style: italic;
-    color: #FFDC00;
-    font-size: 0.85em;
-  }
-  .warning-message {
-    color: #FF851B !important; /* Orange for warnings */
-    font-size: 0.85em !important;
-  }
-  .error-message {
-    color: #FF4136 !important; /* Red for errors */
-    font-weight: bold;
-    padding: 0.5em;
-    border-radius: 4px;
-    background-color: rgba(255, 65, 54, 0.1);
-    text-align: center;
-    font-size: 0.9em;
-  }
-  .global-error-msg { margin-top: 0.5em; }
-  .data-error-msg { margin-top: 0.5em; }
-
-
-  /* Responsive: Stack map and chart vertically by default (mobile-first thinking) */
-  /* Larger screens can have them side-by-side if desired */
-  @media (min-width: 768px) {
-    .main-content {
-      /* flex-direction: row; */ /* Uncomment for side-by-side layout */
-    }
-    .map-panel, .chart-panel {
-      /* flex: 1; */ /* If side-by-side, make them share space */
-    }
-    .map-container {
-      height: 400px;
-    }
-    .chart-area-wrapper {
-      height: 350px;
-    }
-  }
-  @media (min-width: 1024px) {
-    .main-content {
-      flex-direction: row; 
-    }
-    .map-panel, .chart-panel {
-      flex: 1; 
-    }
-  }
-
-</style>
