@@ -170,11 +170,11 @@
 
   // --- Map Logic ---
   function initMap() {
-    if (typeof L === 'undefined' || !mapDiv) {
-      globalError = "Map library or map container not ready.";
-      console.error(globalError);
-      return;
-    }
+    if (!isMounted || typeof L === 'undefined' || !mapDiv) {
+    globalError = "Map library or map container not ready.";
+    console.error(globalError);
+    return;
+  }
     try {
       mapInstance = L.map(mapDiv).setView([34, -70], 4);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -321,11 +321,11 @@
 
   // --- Chart Logic ---
   function initChart() {
-    if (!chartCanvas || typeof Chart === 'undefined') {
-      globalError = "Chart library or chart canvas not ready.";
-      console.error(globalError);
-      return;
-    }
+    if (!isMounted || !chartCanvas || typeof Chart === 'undefined') {
+    globalError = "Chart library or chart canvas not ready.";
+    console.error(globalError);
+    return;
+  }
     try {
       const ctx = chartCanvas.getContext('2d');
       chartInstance = new Chart(ctx, {
@@ -367,7 +367,7 @@
   }
 
   function updateChart() {
-    if (!chartInstance) return;
+    if (!isMounted || !chartInstance) return;
     const currentMetricInfo = METRICS[selectedMetricKey];
     chartInstance.options.scales.y.title.text = currentMetricInfo.label + (currentMetricInfo.unit ? ` (${currentMetricInfo.unit})` : '');
     chartInstance.options.scales.y.beginAtZero = !currentMetricInfo.isDirection;
@@ -441,9 +441,9 @@
     if (chartInstance) { try { chartInstance.destroy(); } catch (e) {} }
   });
 
-  $: if (selectedMetricKey && chartInstance) {
-    updateChart();
-  }
+  $: if (isMounted && selectedMetricKey && chartInstance) {
+  updateChart();
+}
 </script>
 
 <!-- ... TEMPLATE START ... -->
