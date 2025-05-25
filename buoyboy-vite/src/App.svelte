@@ -430,10 +430,6 @@ onMount(async () => {
     globalError = "Chart library or element failed to load. Try refreshing.";
   }
 });
-onDestroy(() => {
-  if (mapInstance) { mapInstance.remove(); mapInstance = null; }
-  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-});
 
 onDestroy(() => {
   if (mapInstance) { try { mapInstance.remove(); } catch(e){} }
