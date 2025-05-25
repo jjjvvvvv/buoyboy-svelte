@@ -150,9 +150,9 @@
 
   const METRICS = {
     WVHT: { key: 'waveHeight', label: 'Wave Height', unit: 'ft', specIndex: 5, isDirection: false },
-    SwH: { key: 'swellHeight', label: 'Swell Height', unit: 'ft', specIndex: 6, isDirection: false },
-    SwP: { key: 'swellPeriod', label: 'Swell Period', unit: 's', specIndex: 7, isDirection: false },
-    SwD: { key: 'swellDirection', label: 'Swell Direction', unit: '°', specIndex: 14, isDirection: true }
+    SwH:  { key: 'swellHeight', label: 'Swell Height', unit: 'ft', specIndex: 6, isDirection: false },
+    SwP:  { key: 'swellPeriod', label: 'Swell Period', unit: 's', specIndex: 7, isDirection: false },
+    SwD:  { key: 'swellDirection', label: 'Swell Direction', unit: '°', specIndex: 14, isDirection: true }
   };
 
   // --- App State ---
@@ -167,16 +167,17 @@
   let globalError = null;
   let dataFetchError = null;
   let isMounted = false;
+  let mapDiv; // <--- New variable for bind:this
 
   // --- Map Logic ---
   function initMap() {
-    if (typeof L === 'undefined' || !document.getElementById('map')) {
+    if (typeof L === 'undefined' || !mapDiv) {
       globalError = "Map library or map container not ready.";
       console.error(globalError);
       return;
     }
     try {
-      mapInstance = L.map('map').setView([34, -70], 4);
+      mapInstance = L.map(mapDiv).setView([34, -70], 4);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
       }).addTo(mapInstance);
@@ -409,7 +410,7 @@
   onMount(async () => {
     isMounted = true;
     await tick();
-    if (typeof L !== 'undefined' && document.getElementById('map')) {
+    if (typeof L !== 'undefined' && mapDiv) {
       initMap();
     } else {
       globalError = "Map library or element failed to load. Try refreshing.";
@@ -431,3 +432,252 @@
     updateChart();
   }
 </script>
+
+<!-- ... TEMPLATE START ... -->
+<div class="buoyboy-app">
+  <header class="app-header">
+    <h1>🌊 BuoyBoy</h1>
+    {#if selectedBuoys.length > 0}
+      <button class="clear-all-btn" on:click={clearAllSelections} title="Clear All Selections">
+        Clear All (X)
+      </button>
+    {/if}
+  </header>
+
+  <div class="main-content">
+    <div class="map-panel">
+      <div bind:this={mapDiv} id="map" class="map-container"></div>
+      {#if globalError}
+        <p class="error-message global-error-msg">{globalError}</p>
+      {/if}
+    </div>
+
+    <div class="chart-panel">
+      <div class="controls">
+        <label for="metric-picker">Metric:</label>
+        <select id="metric-picker" bind:value={selectedMetricKey}>
+          {#each Object.entries(METRICS) as [key, { label, unit }]}
+            <option value={key}>{label} {unit ? `(${unit})` : ''}</option>
+          {/each}
+        </select>
+      </div>
+
+      <div class="chart-area-wrapper">
+        {#if selectedBuoys.length === 0}
+          <p class="placeholder-text">Select up to {MAX_SELECTED_BUOYS} buoys on the map to view data.</p>
+        {:else}
+          <canvas bind:this={chartCanvas} id="buoyChart"></canvas>
+        {/if}
+      </div>
+      {#if dataFetchError}
+        <p class="error-message data-error-msg">{dataFetchError}</p>
+      {/if}
+    </div>
+  </div>
+
+  <div class="selected-buoys-metadata">
+    {#if selectedBuoys.length > 0}
+      <h3>Selected Buoys Details:</h3>
+      {#each selectedBuoys as buoy (buoy.id)}
+        <div class="buoy-info-item" style="border-left-color:{buoy.color};">
+          <div class="buoy-info-header">
+            <span class="buoy-color-dot" style="background-color:{buoy.color};"></span>
+            <strong>{buoy.name || `Buoy ${buoy.id}`}</strong>
+            {#if buoy.isLoading}
+              <span class="loading-text">(Loading data...)</span>
+            {/if}
+          </div>
+          {#if !buoy.isLoading && buoyDataCache[buoy.id]}
+            <p>Last Update: {formatDisplayDate(buoyDataCache[buoy.id].lastUpdate)}</p>
+            {#if buoyDataCache[buoy.id].hasMissingData}
+              <p class="warning-message">⚠️ Some data points may be missing for this period.</p>
+            {/if}
+             {#if buoyDataCache[buoy.id].error}
+              <p class="error-message">⚠️ Could not load data for this buoy.</p>
+            {/if}
+          {/if}
+        </div>
+      {/each}
+    {/if}
+  </div>
+</div>
+
+<style>
+  :global(body) {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #282c34;
+    color: #f0f0f0;
+    line-height: 1.6;
+  }
+
+  .buoyboy-app {
+    padding: 1em;
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 2em);
+  }
+
+  .app-header {
+    text-align: center;
+    margin-bottom: 1em;
+    padding-bottom: 0.5em;
+    border-bottom: 1px solid #444;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .app-header h1 {
+    margin: 0;
+    color: #FFDC00;
+    font-size: 2em;
+  }
+
+  .clear-all-btn {
+    background-color: #555;
+    color: #fff;
+    border: none;
+    padding: 0.5em 1em;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+  }
+  .clear-all-btn:hover {
+    background-color: #FF4136;
+  }
+
+  .main-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+  }
+
+  .map-panel, .chart-panel {
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 1em;
+    background-color: #333740;
+  }
+
+  .map-container {
+    height: 350px;
+    width: 100%;
+    border-radius: 6px;
+  }
+
+  .controls {
+    margin-bottom: 1em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+  }
+  .controls label {
+    font-weight: bold;
+  }
+  .controls select {
+    padding: 0.5em;
+    background-color: #444;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 4px;
+  }
+
+  .chart-area-wrapper {
+    height: 300px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #buoyChart {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .placeholder-text {
+    text-align: center;
+    color: #aaa;
+  }
+
+  .selected-buoys-metadata {
+    margin-top: 1em;
+    padding: 1em;
+    background-color: #333740;
+    border: 1px solid #444;
+    border-radius: 8px;
+  }
+  .selected-buoys-metadata h3 {
+    margin-top: 0;
+    color: #FFDC00;
+  }
+  .buoy-info-item {
+    margin-bottom: 0.75em;
+    padding: 0.5em 0.75em;
+    border-left-width: 5px;
+    border-left-style: solid;
+    background-color: #282c34;
+    border-radius: 0 4px 4px 0;
+  }
+  .buoy-info-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.25em;
+  }
+  .buoy-color-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .buoy-info-item p {
+    margin: 0.2em 0;
+    font-size: 0.9em;
+    color: #ccc;
+  }
+  .loading-text {
+    font-style: italic;
+    color: #FFDC00;
+    font-size: 0.85em;
+  }
+  .warning-message {
+    color: #FF851B !important;
+    font-size: 0.85em !important;
+  }
+  .error-message {
+    color: #FF4136 !important;
+    font-weight: bold;
+    padding: 0.5em;
+    border-radius: 4px;
+    background-color: rgba(255, 65, 54, 0.1);
+    text-align: center;
+    font-size: 0.9em;
+  }
+  .global-error-msg { margin-top: 0.5em; }
+  .data-error-msg { margin-top: 0.5em; }
+
+  @media (min-width: 768px) {
+    .main-content {
+      /* flex-direction: row; */
+    }
+    .map-panel, .chart-panel {
+      /* flex: 1; */
+    }
+    .map-container {
+      height: 400px;
+    }
+    .chart-area-wrapper {
+      height: 350px;
+    }
+  }
+  @media (min-width: 1024px) {
+    .main-content {
+      flex-direction: row;
+    }
+    .map-panel, .chart-panel {
+      flex: 1;
+    }
+  }
+</style>
