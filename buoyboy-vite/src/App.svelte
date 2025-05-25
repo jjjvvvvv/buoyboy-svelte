@@ -6,7 +6,7 @@
 <script>
   import { onMount, onDestroy, tick} from 'svelte';
   let Chart; // Declare Chart here for later use
-  
+
   // --- Buoy station metadata: Copy-paste your station objects array below ---
   const stations = [
   { id: "41008", name: "GRAYS REEF - 40 NM Southeast of Savannah, GA", lat: 31.4, lon: -80.866 },
@@ -410,8 +410,10 @@
   if (typeof window === 'undefined') return; // SSR guard
 
   // Dynamically import Chart.js and date adapter
-  const ChartModule = await import('chart.js/auto');
-  await import('chartjs-adapter-date-fns');
+  const [ChartModule] = await Promise.all([
+    import('chart.js/auto'),
+    import('chartjs-adapter-date-fns')
+  ]);
   Chart = ChartModule.default || ChartModule;
 
   // Wait for next DOM update
