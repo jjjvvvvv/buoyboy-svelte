@@ -1,12 +1,12 @@
 <svelte:head>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
 </svelte:head>
 
 <script>
   import { onMount, onDestroy } from 'svelte';
+  import Chart from 'chart.js/auto'; // This registers everything needed
+  import 'chartjs-adapter-date-fns'; // This makes time scale work!
 
   // --- Buoy station metadata: Copy-paste your station objects array below ---
   const stations = [
@@ -331,17 +331,6 @@ function initChart() {
       return;
   }
   try {
-      // Chart.js 3+ CDN registration (if not using ES6 modules)
-      if (Chart.TimeScale) Chart.register(Chart.TimeScale);
-      if (Chart.LineController && Chart.LineElement && Chart.PointElement && Chart.Legend && Chart.Tooltip) {
-        Chart.register(
-          Chart.LineController,
-          Chart.LineElement,
-          Chart.PointElement,
-          Chart.Legend,
-          Chart.Tooltip
-        );
-      }
       const ctx = chartCanvas.getContext('2d');
       chartInstance = new Chart(ctx, {
         type: 'line',
