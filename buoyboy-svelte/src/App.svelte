@@ -143,330 +143,327 @@
   ];
 
   // --- Constants ---
-  const MAX_SELECTED_BUOYS = 3;
-  const BUOY_COLORS = ['#FF4136', '#FFDC00', '#0074D9']; // Red, Yellow, Blue
-  const DEFAULT_BUOY_COLOR = '#888888'; // Gray for unselected
-  const METER_TO_FEET = 3.28084;
+const MAX_SELECTED_BUOYS = 3;
+const BUOY_COLORS = ['#FF4136', '#FFDC00', '#0074D9']; // Red, Yellow, Blue
+const DEFAULT_BUOY_COLOR = '#888888'; // Gray for unselected
+const METER_TO_FEET = 3.28084;
 
-  const METRICS = {
-    // Key: { internalKey, label, unit, specIndex (0-based for NOAA .spec file) }
-    WVHT: { key: 'waveHeight',     label: 'Wave Height',     unit: 'ft', specIndex: 5, isDirection: false },
-    SwH:  { key: 'swellHeight',    label: 'Swell Height',    unit: 'ft', specIndex: 6, isDirection: false },
-    SwP:  { key: 'swellPeriod',    label: 'Swell Period',    unit: 's',  specIndex: 7, isDirection: false },
-    SwD:  { key: 'swellDirection', label: 'Swell Direction', unit: '°',  specIndex: 14, isDirection: true } // Swell Direction
-  };
+const METRICS = {
+  WVHT: { key: 'waveHeight',     label: 'Wave Height',     unit: 'ft', specIndex: 5, isDirection: false },
+  SwH:  { key: 'swellHeight',    label: 'Swell Height',    unit: 'ft', specIndex: 6, isDirection: false },
+  SwP:  { key: 'swellPeriod',    label: 'Swell Period',    unit: 's',  specIndex: 7, isDirection: false },
+  SwD:  { key: 'swellDirection', label: 'Swell Direction', unit: '°',  specIndex: 14, isDirection: true }
+};
 
-  // --- App State ---
-  let selectedBuoys = []; // Array of { id, name, lat, lon, color, isLoading }
-  let buoyDataCache = {}; // { buoyId: { readings: [], lastUpdate: Date, hasMissingData: boolean } }
-  let selectedMetricKey = 'SwH'; // Default metric key from METRICS
+// --- App State ---
+let selectedBuoys = []; // Array of { id, name, lat, lon, color, isLoading }
+let buoyDataCache = {}; // { buoyId: { readings: [], lastUpdate: Date, hasMissingData: boolean } }
+let selectedMetricKey = 'SwH'; // Default metric key from METRICS
 
-  let mapInstance;
-  let mapMarkers = []; // Holds { id, leafletMarkerInstance }
+let mapInstance;
+let mapMarkers = []; // Holds { id, leafletMarkerInstance }
 
-  let chartInstance;
-  let chartCanvas; // Bound to the canvas element
+let chartInstance;
+let chartCanvas; // Bound to the canvas element
 
-  let globalError = null; // For general errors like library loading
-  let dataFetchError = null; // For errors specific to buoy data fetching
+let globalError = null; // For general errors like library loading
+let dataFetchError = null; // For errors specific to buoy data fetching
 
-  // --- Map Logic ---
-  function initMap() {
-    if (typeof L === 'undefined' || !document.getElementById('map')) {
-        globalError = "Map library or map container not ready.";
-        console.error(globalError);
-        return;
-    }
-    try {
-        mapInstance = L.map('map').setView([34, -70], 4); // Adjusted initial view
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(mapInstance);
+// --- Map Logic ---
+function initMap() {
+  if (typeof L === 'undefined' || !document.getElementById('map')) {
+      globalError = "Map library or map container not ready.";
+      console.error(globalError);
+      return;
+  }
+  try {
+      mapInstance = L.map('map').setView([34, -70], 4);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(mapInstance);
 
-        mapMarkers = stations.map(station => {
-          const marker = L.marker([station.lat, station.lon], {
-            icon: L.divIcon({
-              className: 'custom-div-icon', // For potential global styling
-              html: `<div style="background-color:${DEFAULT_BUOY_COLOR};width:14px;height:14px;border-radius:50%;border:1px solid #fff;"></div>`,
-              iconSize: [14, 14],
-              iconAnchor: [7, 7]
-            })
+      mapMarkers = stations.map(station => {
+        const marker = L.marker([station.lat, station.lon], {
+          icon: L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div style="background-color:${DEFAULT_BUOY_COLOR};width:14px;height:14px;border-radius:50%;border:1px solid #fff;"></div>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
           })
-          .addTo(mapInstance)
-          .on('click', () => toggleBuoySelection(station.id));
-          return { id: station.id, marker }; // Store marker instance with its ID
-        });
-        // No need to call updateMapMarkers here, initial state is correct.
-    } catch (e) {
-        globalError = "Error initializing map: " + e.message;
-        console.error(globalError, e);
+        })
+        .addTo(mapInstance)
+        .on('click', () => toggleBuoySelection(station.id));
+        return { id: station.id, marker };
+      });
+  } catch (e) {
+      globalError = "Error initializing map: " + e.message;
+      console.error(globalError, e);
+  }
+}
+
+function updateMapMarkers() {
+  if (!mapInstance) return;
+  mapMarkers.forEach(({ id, marker }) => {
+    const selectedBuoy = selectedBuoys.find(b => b.id === id);
+    const color = selectedBuoy ? selectedBuoy.color : DEFAULT_BUOY_COLOR;
+    marker.setIcon(L.divIcon({
+      className: 'custom-div-icon',
+      html: `<div style="background-color:${color};width:14px;height:14px;border-radius:50%;border:1px solid #fff;"></div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7]
+    }));
+  });
+}
+
+async function toggleBuoySelection(buoyId) {
+  dataFetchError = null;
+  const existingIndex = selectedBuoys.findIndex(b => b.id === buoyId);
+
+  if (existingIndex > -1) {
+    selectedBuoys = selectedBuoys.filter(b => b.id !== buoyId);
+  } else if (selectedBuoys.length < MAX_SELECTED_BUOYS) {
+    const stationInfo = stations.find(s => s.id === buoyId);
+    if (stationInfo) {
+      const usedColors = selectedBuoys.map(b => b.color);
+      const availableColor = BUOY_COLORS.find(c => !usedColors.includes(c)) || BUOY_COLORS[selectedBuoys.length % BUOY_COLORS.length];
+      const newBuoy = { ...stationInfo, color: availableColor, isLoading: true };
+      selectedBuoys = [...selectedBuoys, newBuoy];
+      await fetchBuoyData(newBuoy);
     }
+  } else {
+    dataFetchError = `Max ${MAX_SELECTED_BUOYS} buoys can be selected.`;
+    setTimeout(() => dataFetchError = null, 3000);
   }
+  updateMapMarkers();
+  updateChart();
+}
 
-  function updateMapMarkers() {
-    if (!mapInstance) return;
-    mapMarkers.forEach(({ id, marker }) => {
-      const selectedBuoy = selectedBuoys.find(b => b.id === id);
-      const color = selectedBuoy ? selectedBuoy.color : DEFAULT_BUOY_COLOR;
-      marker.setIcon(L.divIcon({
-        className: 'custom-div-icon',
-        html: `<div style="background-color:${color};width:14px;height:14px;border-radius:50%;border:1px solid #fff;"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
-      }));
-    });
-  }
+function clearAllSelections() {
+  selectedBuoys = [];
+  dataFetchError = null;
+  updateMapMarkers();
+  updateChart();
+}
 
-  async function toggleBuoySelection(buoyId) {
-    dataFetchError = null; // Clear previous fetch error
-    const existingIndex = selectedBuoys.findIndex(b => b.id === buoyId);
+// --- Data Fetching Logic ---
+async function fetchBuoyData(buoy) {
+  const buoyInSelection = selectedBuoys.find(b => b.id === buoy.id);
+  if (buoyInSelection) buoyInSelection.isLoading = true;
+  selectedBuoys = [...selectedBuoys];
 
-    if (existingIndex > -1) { // Buoy is selected, deselect it
-      selectedBuoys = selectedBuoys.filter(b => b.id !== buoyId);
-    } else if (selectedBuoys.length < MAX_SELECTED_BUOYS) { // Buoy not selected, select it
-      const stationInfo = stations.find(s => s.id === buoyId);
-      if (stationInfo) {
-        const usedColors = selectedBuoys.map(b => b.color);
-        const availableColor = BUOY_COLORS.find(c => !usedColors.includes(c)) || BUOY_COLORS[selectedBuoys.length % BUOY_COLORS.length]; // Fallback
-
-        const newBuoy = {
-          ...stationInfo,
-          color: availableColor,
-          isLoading: true // Set loading true initially
-        };
-        selectedBuoys = [...selectedBuoys, newBuoy];
-        await fetchBuoyData(newBuoy); // Fetch data for the newly selected buoy
-      }
-    } else {
-      dataFetchError = `Max ${MAX_SELECTED_BUOYS} buoys can be selected.`;
-      setTimeout(() => dataFetchError = null, 3000);
-    }
-    updateMapMarkers();
-    updateChart(); // Update chart with new selection or removal
-  }
-
-  function clearAllSelections() {
-    selectedBuoys = [];
-    // buoyDataCache = {}; // Optionally clear cache, or let it persist
-    dataFetchError = null;
-    updateMapMarkers();
-    updateChart();
-  }
-
-  // --- Data Fetching Logic ---
-  async function fetchBuoyData(buoy) {
-    // Find the buoy in selectedBuoys to update its isLoading state
-    const buoyInSelection = selectedBuoys.find(b => b.id === buoy.id);
-    if (buoyInSelection) buoyInSelection.isLoading = true;
-    selectedBuoys = [...selectedBuoys]; // Trigger reactivity for loading state
-
-    // Check cache first (simple check, could be more sophisticated with expiry)
-    if (buoyDataCache[buoy.id]) {
-        if (buoyInSelection) buoyInSelection.isLoading = false;
-        selectedBuoys = [...selectedBuoys];
-        updateChart(); // Ensure chart updates if data was cached
-        return;
-    }
-
-    try {
-      const response = await fetch(`https://www.ndbc.noaa.gov/data/5day2/${buoy.id}_5day.spec`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status} for buoy ${buoy.id}`);
-      }
-      const specText = await response.text();
-      const parsedData = parseBuoyData(specText);
-      buoyDataCache = { ...buoyDataCache, [buoy.id]: parsedData };
-
+  if (buoyDataCache[buoy.id]) {
       if (buoyInSelection) buoyInSelection.isLoading = false;
       selectedBuoys = [...selectedBuoys];
       updateChart();
-    } catch (error) {
-      console.error(`Error fetching data for buoy ${buoy.id}:`, error);
-      dataFetchError = `Could not load data for ${buoy.name || buoy.id}.`;
-      if (buoyInSelection) buoyInSelection.isLoading = false;
-      // Add a placeholder in cache to avoid refetching on error immediately
-      buoyDataCache = { ...buoyDataCache, [buoy.id]: { readings: [], lastUpdate: null, hasMissingData: true, error: true } };
-      selectedBuoys = [...selectedBuoys];
-      updateChart(); // Update chart to reflect error or no data
-    }
+      return;
   }
 
-  function parseBuoyData(specText) {
-    const lines = specText.split('\n').slice(2); // Skip header lines
-    const readings = [];
-    let latestTimestamp = null;
-    let hasMissingData = false;
+  try {
+    const response = await fetch(`/api/buoy?buoyId=${buoy.id}`);
+    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status} for buoy ${buoy.id}`);
+    const specText = await response.text();
+    const parsedData = parseBuoyData(specText);
+    buoyDataCache = { ...buoyDataCache, [buoy.id]: parsedData };
 
-    for (const line of lines) {
-      const parts = line.trim().split(/\s+/); // Split by one or more spaces
-      if (parts.length < 15) continue; // Need at least 15 columns for SwD
+    if (buoyInSelection) buoyInSelection.isLoading = false;
+    selectedBuoys = [...selectedBuoys];
+    updateChart();
+  } catch (error) {
+    console.error(`Error fetching data for buoy ${buoy.id}:`, error);
+    dataFetchError = `Could not load data for ${buoy.name || buoy.id}.`;
+    if (buoyInSelection) buoyInSelection.isLoading = false;
+    buoyDataCache = { ...buoyDataCache, [buoy.id]: { readings: [], lastUpdate: null, hasMissingData: true, error: true } };
+    selectedBuoys = [...selectedBuoys];
+    updateChart();
+  }
+}
 
-      const yy = parseInt(parts[0]);
-      const mm = parseInt(parts[1]);
-      const dd = parseInt(parts[2]);
-      const hr = parseInt(parts[3]);
-      const mn = parseInt(parts[4]);
+function parseBuoyData(specText) {
+  const lines = specText.split('\n').slice(2);
+  const readings = [];
+  let latestTimestamp = null;
+  let hasMissingData = false;
 
-      if ([yy, mm, dd, hr, mn].some(isNaN)) continue;
+  for (const line of lines) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 15) continue;
 
-      const year = 2000 + yy; // Assuming 21st century
-      const timestamp = new Date(Date.UTC(year, mm - 1, dd, hr, mn)); // JS months are 0-indexed
+    const yy = parseInt(parts[0]);
+    const mm = parseInt(parts[1]);
+    const dd = parseInt(parts[2]);
+    const hr = parseInt(parts[3]);
+    const mn = parseInt(parts[4]);
+    if ([yy, mm, dd, hr, mn].some(isNaN)) continue;
+    const year = 2000 + yy;
+    const timestamp = new Date(Date.UTC(year, mm - 1, dd, hr, mn));
+    if (isNaN(timestamp.getTime())) continue;
+    if (!latestTimestamp || timestamp > latestTimestamp) latestTimestamp = timestamp;
 
-      if (isNaN(timestamp.getTime())) continue;
-
-      if (!latestTimestamp || timestamp > latestTimestamp) {
-        latestTimestamp = timestamp;
-      }
-
-      const reading = { timestamp };
-      let lineMissing = false;
-      Object.entries(METRICS).forEach(([metricCode, metricInfo]) => {
-        const rawValue = parts[metricInfo.specIndex];
-        if (rawValue === "MM" || rawValue === undefined) {
+    const reading = { timestamp };
+    let lineMissing = false;
+    Object.entries(METRICS).forEach(([metricCode, metricInfo]) => {
+      const rawValue = parts[metricInfo.specIndex];
+      if (rawValue === "MM" || rawValue === undefined) {
+        reading[metricInfo.key] = null;
+        lineMissing = true;
+      } else {
+        const value = parseFloat(rawValue);
+        if (isNaN(value)) {
           reading[metricInfo.key] = null;
           lineMissing = true;
         } else {
-          const value = parseFloat(rawValue);
-          if (isNaN(value)) {
-            reading[metricInfo.key] = null;
-            lineMissing = true;
-          } else {
-            reading[metricInfo.key] = metricInfo.unit === 'ft' ? value * METER_TO_FEET : value;
-          }
+          reading[metricInfo.key] = metricInfo.unit === 'ft' ? value * METER_TO_FEET : value;
+        }
+      }
+    });
+    if (lineMissing) hasMissingData = true;
+    readings.push(reading);
+  }
+  readings.sort((a,b) => a.timestamp - b.timestamp);
+  return { readings, lastUpdate: latestTimestamp, hasMissingData };
+}
+
+// --- Chart Logic ---
+function initChart() {
+  if (!chartCanvas || typeof Chart === 'undefined') {
+      globalError = "Chart library or chart canvas not ready.";
+      console.error(globalError);
+      return;
+  }
+  try {
+      // Chart.js 3+ CDN registration (if not using ES6 modules)
+      if (Chart.TimeScale) Chart.register(Chart.TimeScale);
+      if (Chart.LineController && Chart.LineElement && Chart.PointElement && Chart.Legend && Chart.Tooltip) {
+        Chart.register(
+          Chart.LineController,
+          Chart.LineElement,
+          Chart.PointElement,
+          Chart.Legend,
+          Chart.Tooltip
+        );
+      }
+      const ctx = chartCanvas.getContext('2d');
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [] },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              type: 'time',
+              time: {
+                unit: 'hour',
+                tooltipFormat: 'MMM d, HH:mm',
+                displayFormats: { hour: 'HH:mm', day: 'MMM d' }
+              },
+              title: { display: true, text: 'Time (UTC)', color: '#ccc' },
+              grid: { color: 'rgba(255, 255, 255, 0.1)' },
+              ticks: { color: '#ccc' }
+            },
+            y: {
+              title: { display: true, text: METRICS[selectedMetricKey].label, color: '#ccc' },
+              beginAtZero: !METRICS[selectedMetricKey].isDirection,
+              grid: { color: 'rgba(255, 255, 255, 0.1)' },
+              ticks: { color: '#ccc' }
+            }
+          },
+          plugins: {
+            legend: { display: true, position: 'top', labels: { color: '#eee' } },
+            tooltip: { mode: 'index', intersect: false }
+          },
+          interaction: { mode: 'nearest', axis: 'x', intersect: false }
         }
       });
-      if (lineMissing) hasMissingData = true;
-      readings.push(reading);
-    }
-    readings.sort((a,b) => a.timestamp - b.timestamp); // Ensure chronological order
-    return { readings, lastUpdate: latestTimestamp, hasMissingData };
+  } catch(e) {
+      globalError = "Error initializing chart: " + e.message;
+      console.error(globalError, e);
   }
+}
 
+function updateChart() {
+  if (!chartInstance) return;
+  const currentMetricInfo = METRICS[selectedMetricKey];
+  chartInstance.options.scales.y.title.text = currentMetricInfo.label + (currentMetricInfo.unit ? ` (${currentMetricInfo.unit})` : '');
+  chartInstance.options.scales.y.beginAtZero = !currentMetricInfo.isDirection;
 
-  // --- Chart Logic ---
-  function initChart() {
-    if (!chartCanvas || typeof Chart === 'undefined') {
-        globalError = "Chart library or chart canvas not ready.";
-        console.error(globalError);
-        return;
-    }
-    try {
-        const ctx = chartCanvas.getContext('2d');
-        chartInstance = new Chart(ctx, {
-          type: 'line',
-          data: {
-            datasets: []
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-              x: {
-                type: 'time',
-                time: {
-                  unit: 'hour',
-                  tooltipFormat: 'MMM d, HH:mm', // e.g., May 24, 14:00
-                  displayFormats: { hour: 'HH:mm', day: 'MMM d' }
-                },
-                title: { display: true, text: 'Time (UTC)', color: '#ccc' },
-                grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                ticks: { color: '#ccc' }
-              },
-              y: {
-                title: { display: true, text: METRICS[selectedMetricKey].label, color: '#ccc' },
-                beginAtZero: !METRICS[selectedMetricKey].isDirection,
-                grid: { color: 'rgba(255, 255, 255, 0.1)' },
-                ticks: { color: '#ccc' }
-              }
-            },
-            plugins: {
-              legend: { display: true, position: 'top', labels: { color: '#eee' } },
-              tooltip: { mode: 'index', intersect: false }
-            },
-            interaction: { mode: 'nearest', axis: 'x', intersect: false }
-          }
-        });
-    } catch(e) {
-        globalError = "Error initializing chart: " + e.message;
-        console.error(globalError, e);
-    }
-  }
-
-  function updateChart() {
-    if (!chartInstance) return;
-
-    const currentMetricInfo = METRICS[selectedMetricKey];
-    chartInstance.options.scales.y.title.text = currentMetricInfo.label + (currentMetricInfo.unit ? ` (${currentMetricInfo.unit})` : '');
-    chartInstance.options.scales.y.beginAtZero = !currentMetricInfo.isDirection;
-
-    const datasets = selectedBuoys.map(buoy => {
+  const datasets = selectedBuoys
+    .filter(b => !b.isLoading && buoyDataCache[b.id] && buoyDataCache[b.id].readings.length)
+    .map(buoy => {
       const buoySpecificData = buoyDataCache[buoy.id];
       const readings = buoySpecificData?.readings || [];
-      
       const dataPoints = readings
         .map(reading => ({
-          x: reading.timestamp.getTime(),
+          x: reading.timestamp, // <-- Date object, not milliseconds
           y: reading[currentMetricInfo.key]
         }))
         .filter(point => point.y !== null && point.y !== undefined && !isNaN(point.y));
-
       return {
         label: `${buoy.name || buoy.id}`,
         data: dataPoints,
         borderColor: buoy.color,
-        backgroundColor: buoy.color + '33', // For fill if enabled
+        backgroundColor: buoy.color + '33',
         tension: 0.1,
         fill: false,
-        pointRadius: dataPoints.length < 100 ? 2 : 1, // Smaller points for more data
+        pointRadius: dataPoints.length < 100 ? 2 : 1,
         pointHoverRadius: 4
       };
     });
 
-    chartInstance.data.datasets = datasets;
-    chartInstance.update();
-  }
+  chartInstance.data.datasets = datasets;
+  chartInstance.update();
+}
 
-  // Utility to format date for display
-  function formatDisplayDate(date) {
-    if (!date || isNaN(new Date(date).getTime())) return "N/A";
-    return new Date(date).toLocaleString('en-US', {
-        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false
-    }) + " UTC";
-  }
+// Utility to format date for display
+function formatDisplayDate(date) {
+  if (!date || isNaN(new Date(date).getTime())) return "N/A";
+  return new Date(date).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC', hour12: false
+  }) + " UTC";
+}
 
-  // --- Lifecycle ---
-  onMount(() => {
-    let attempts = 0;
-    const maxAttempts = 50; // 5 seconds
+// --- Lifecycle ---
+onMount(() => {
+  // Initialize Map as soon as L and #map are ready
+  let mapAttempts = 0;
+  const maxMapAttempts = 50;
+  const mapInterval = setInterval(() => {
+    mapAttempts++;
+    if (typeof L !== 'undefined' && document.getElementById('map')) {
+      clearInterval(mapInterval);
+      initMap();
+    } else if (mapAttempts >= maxMapAttempts) {
+      clearInterval(mapInterval);
+      globalError = "Map library or element failed to load. Try refreshing.";
+      console.error("Timeout waiting for map libraries or DOM elements.");
+    }
+  }, 100);
 
-    const librariesAndDOMLoadCheck = setInterval(() => {
-      attempts++;
-      const mapElementReady = typeof L !== 'undefined' && document.getElementById('map');
-      const chartElementReady = typeof Chart !== 'undefined' && chartCanvas;
+  // Initialize Chart as soon as Chart.js and chartCanvas are ready
+  let chartAttempts = 0;
+  const maxChartAttempts = 50;
+  const chartInterval = setInterval(() => {
+    chartAttempts++;
+    if (typeof Chart !== 'undefined' && chartCanvas) {
+      clearInterval(chartInterval);
+      initChart();
+    } else if (chartAttempts >= maxChartAttempts) {
+      clearInterval(chartInterval);
+      if (!globalError) globalError = "Chart library or element failed to load. Try refreshing.";
+      console.error("Timeout waiting for chart libraries or DOM elements.");
+    }
+  }, 100);
+});
 
-      if (mapElementReady && chartElementReady) {
-        clearInterval(librariesAndDOMLoadCheck);
-        initMap();
-        initChart();
-      } else if (attempts >= maxAttempts) {
-        clearInterval(librariesAndDOMLoadCheck);
-        if (!mapElementReady) globalError = "Map library or element failed to load. Try refreshing.";
-        if (!chartElementReady && !globalError) globalError = "Chart library or element failed to load. Try refreshing.";
-        console.error("Timeout waiting for libraries or DOM elements:", {mapElementReady, chartElementReady});
-      }
-    }, 100);
-  });
+onDestroy(() => {
+  if (mapInstance) { try { mapInstance.remove(); } catch(e){} }
+  if (chartInstance) { try { chartInstance.destroy(); } catch(e){} }
+});
 
-  onDestroy(() => {
-    if (mapInstance) { try { mapInstance.remove(); } catch(e){} }
-    if (chartInstance) { try { chartInstance.destroy(); } catch(e){} }
-  });
-
-  // Reactive update for chart when metric changes
-  $: if (selectedMetricKey && chartInstance) {
-    updateChart();
-  }
-
+// Reactive update for chart when metric changes
+$: if (selectedMetricKey && chartInstance) {
+  updateChart();
+}
 </script>
 
 <div class="buoyboy-app">
@@ -535,7 +532,6 @@
       {/each}
     {/if}
   </div>
-
 </div>
 
 <style>
